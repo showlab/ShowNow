@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShowNow Play</title>
+<style>
+  :root {
+    --bg: #0f1012; --panel: #17181b; --line: #2a2c31; --text: #e8e6e3; --muted: #9a9894;
+    --accent: #e0633a; --ok: #6cbf7f; --warn: #d9a441;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: .02em; }
+  h1 span { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 8px; }
+  #state { font-size: 13px; color: var(--muted); }
+  #state b { color: var(--warn); font-weight: 600; }
+  #state b.ok { color: var(--ok); }
+  .screen { position: relative; margin-top: 12px; aspect-ratio: 864 / 480; background: #000;
+            border: 1px solid var(--line); border-radius: 6px; overflow: hidden; outline: none; }
+  .screen:focus-visible { border-color: var(--accent); }
+  .screen img { width: 100%; height: 100%; display: block; object-fit: contain; image-rendering: auto; }
+  .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+             background: rgba(0,0,0,.55); font-size: 16px; text-align: center; padding: 16px; }
+  .overlay[hidden] { display: none; }
+  .bar { display: flex; gap: 20px; align-items: center; justify-content: space-between; margin-top: 14px;
+         flex-wrap: wrap; }
+  .keys { display: grid; grid-template-columns: repeat(3, 44px) 72px; grid-template-rows: repeat(2, 44px); gap: 6px; }
+  .k { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; display: flex;
+       align-items: center; justify-content: center; font-weight: 700; font-size: 16px; color: var(--muted);
+       user-select: none; touch-action: none; cursor: pointer; }
+  .k.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .k.w { grid-column: 2; grid-row: 1; } .k.a { grid-column: 1; grid-row: 2; }
+  .k.s { grid-column: 2; grid-row: 2; } .k.d { grid-column: 3; grid-row: 2; }
+  .k.q { grid-column: 1; grid-row: 1; } .k.e { grid-column: 3; grid-row: 1; }
+  .k.f { grid-column: 4; grid-row: 1; font-size: 13px; } .k.space { grid-column: 4; grid-row: 2; font-size: 13px; }
+  .actions { display: flex; gap: 8px; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+           padding: 8px 14px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  kbd { font: 12px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 4px;
+        padding: 0 5px; margin-right: 6px; color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+  .stat .l { color: var(--muted); font-size: 12px; }
+  .stat .v { font-size: 16px; font-variant-numeric: tabular-nums; }
+  p.note { color: var(--muted); font-size: 12.5px; margin-top: 16px; }
+  @media (max-width: 600px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>ShowNow <span>8 actions · speculative tree · one H100, real time</span></h1>
+    <div id="state">State: <b id="st">connecting…</b></div>
+  </header>
+
+  <div class="screen" id="screen" tabindex="0">
+    <img id="video" alt="generated video">
+    <div class="overlay" id="overlay">Click the video, then hold W / A / S / D to move, Q / E to turn, F to fire, Space to jump</div>
+  </div>
+
+  <div class="bar">
+    <div class="keys" id="pad">
+      <div class="k w" data-k="w">W</div><div class="k a" data-k="a">A</div>
+      <div class="k s" data-k="s">S</div><div class="k d" data-k="d">D</div>
+      <div class="k q" data-k="q">Q</div><div class="k e" data-k="e">E</div>
+      <div class="k f" data-k="f">F fire</div><div class="k space" data-k="space">jump</div>
+    </div>
+    <div class="actions">
+      <button id="reset"><kbd>R</kbd>restart scene</button>
+      <button id="next"><kbd>N</kbd>next scene</button>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="l">scene</div><div class="v" id="scene">–</div></div>
+    <div class="stat"><div class="l">generated</div><div class="v" id="vs">–</div></div>
+    <div class="stat"><div class="l">candidates / step</div><div class="v" id="gen">–</div></div>
+    <div class="stat"><div class="l">commit + decode</div><div class="v" id="com">–</div></div>
+  </div>
+
+  <p class="note">
+    Every 0.25 s (4 frames) the model generates the next latent for every supported key in one shared-history tree
+    pass; the held key is read just before the screen runs out, and only that candidate is committed and decoded.
+    With no key held the world pauses. The first seconds are real game frames; everything after is generated.
+  </p>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const post = (path, body) => fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
+                                           body: JSON.stringify(body || {}) }).catch(() => {});
+const held = new Set();
+const KEYS = new Set(["w", "a", "s", "d", "q", "e", "f", "space"]);
+const name = e => (e.key === " " ? "space" : e.key.toLowerCase());
+const pad = k => document.querySelector(`.k[data-k="${k}"]`);
+
+function setKey(k, down) {
+  if (down === held.has(k)) return;
+  down ? held.add(k) : held.delete(k);
+  pad(k).classList.toggle("on", down);
+  post("/key", { key: k, down });
+}
+function releaseAll() { [...held].forEach(k => setKey(k, false)); post("/release_all"); }
+function reset(next) { releaseAll(); post("/reset", { next: !!next }); }
+
+window.addEventListener("keydown", e => {
+  const k = e.key.toLowerCase();
+  if (KEYS.has(name(e))) { e.preventDefault(); if (!e.repeat) setKey(name(e), true); $("overlay").hidden = true; }
+  else if (k === "r" && !e.repeat) reset(false);
+  else if (k === "n" && !e.repeat) reset(true);
+});
+window.addEventListener("keyup", e => { if (KEYS.has(name(e))) setKey(name(e), false); });
+window.addEventListener("blur", releaseAll);
+document.addEventListener("visibilitychange", () => { if (document.hidden) releaseAll(); });
+$("screen").addEventListener("click", () => { $("screen").focus(); $("overlay").hidden = true; });
+$("reset").onclick = () => reset(false);
+$("next").onclick = () => reset(true);
+document.querySelectorAll(".k").forEach(el => {  // touch / mouse: hold the on-screen key
+  const k = el.dataset.k;
+  el.addEventListener("pointerdown", e => { e.preventDefault(); el.setPointerCapture(e.pointerId); setKey(k, true); });
+  ["pointerup", "pointercancel"].forEach(t => el.addEventListener(t, () => setKey(k, false)));
+});
+
+function startStream() { $("video").src = "/stream?t=" + Date.now(); }
+$("video").onerror = () => setTimeout(startStream, 1000);
+startStream();
+
+const STATE_ZH = {};
+async function poll() {
+  try {
+    const s = await (await fetch("/status", { cache: "no-store" })).json();
+    const st = $("st");
+    st.textContent = s.state;
+    st.className = s.state === "playing" ? "ok" : "";
+    $("scene").textContent = s.scene || "–";
+    $("vs").textContent = s.video_s != null ? s.video_s.toFixed(1) + " s" : "–";
+    $("gen").textContent = s.gen_ms != null ? s.gen_ms + " ms" : "–";
+    $("com").textContent = s.commit_ms != null ? s.commit_ms + " ms" : "–";
+  } catch (e) { $("st").textContent = "disconnected"; }
+  setTimeout(poll, 500);
+}
+poll();
+</script>
+</body>
+</html>

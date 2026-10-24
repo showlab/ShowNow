@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv*/
+/SolarWM/
+/third_party/
+/models/
+/checkpoints/
+/data/
+/runs/
+/logs/

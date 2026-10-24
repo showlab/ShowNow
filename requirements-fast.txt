@@ -1,0 +1,17 @@
+# Optimised real-time path (shownow/latency/tree_opt.py): same packages as requirements.txt with a newer torch and
+# FlashAttention 3 (Hopper). Used for the real-time latency numbers; training does not need it.
+torch==2.14.1
+flash-attn-3==3.0.0
+numpy==2.2.6
+pyyaml==6.0.3
+einops==0.8.2
+safetensors==0.8.0
+diffusers==0.38.0
+transformers==5.12.1
+accelerate==1.15.0
+imageio==2.37.4
+imageio-ffmpeg==0.6.0
+av==17.1.0
+opencv-python-headless==5.0.0.93
+scipy==1.15.3
+lpips==0.1.4
