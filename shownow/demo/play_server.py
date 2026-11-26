@@ -1,19 +1,19 @@
-"""Playable browser demo: tree B1 Stage2 world model, real time on ONE GPU, controlled with W/A/S/D.
+"""Playable browser demo: action-conditioned tree student on one GPU.
 
-The generation loop is the single-GPU real-time path of shownow/latency/fast_long_infer.py (FastTree + CUDA graph +
+The generation loop uses the reference FastTree engine (CUDA graph +
 per-layer compile + chosen-only commit + TAEHV decode), driven by the browser instead of a key script:
 
-  1. the 4 candidates (W/A/S/D) of the next latent (0.25 s = 4 frames) are generated speculatively;
+  1. candidates for the supported actions of the next latent (0.25 s = 4 frames) are generated speculatively;
   2. the server waits until the frames already on screen are nearly used up (--lead frames left), then reads the key
      held right now, commits only that candidate into the K/V ring and decodes it;
-  3. no key held -> the world pauses (the model only knows W/A/S/D); the precomputed candidates stay valid, so the
+  3. no key held -> the world pauses; the precomputed candidates stay valid, so the
      next key press is served immediately.
 
 Browser keys: W/A/S/D hold to move, Q/E turn, F fire, Space jump (8-action models), R restart the current scene from its real 2 s history, N next scene.
 Video is MJPEG over HTTP (16 fps), keys are small POSTs; no extra Python packages needed. The server binds to
 127.0.0.1 by default: reach it through an ssh tunnel (ssh -L 8765:localhost:8765 <this node>).
 
-  SHOWNOW_N_ACTIONS=9 python -m shownow.demo.play_server --student checkpoints/shownow_8a_stage2_step001000.pt [--port 8765]
+  SHOWNOW_N_ACTIONS=9 python -m shownow.demo.play_server --scene-dir checkpoints/ShowNow-5B-8F/examples/lat
 """
 
 from __future__ import annotations
@@ -146,7 +146,11 @@ class Engine:
         self.sig = [float(tab_s[(tab_t - t).abs().argmin()]) for t in self.fewstep]
         tae = TAEHV(str(REPO / "third_party/taehv/taew2_2.pth")).to(dev, torch.float16).eval()
         self.tae = StreamingTAEHV(tae)
-        if args.data == "sw8a":  # 8-action key-switch forks on the held-out maps (shownow/eval/sw8a_split.py)
+        if getattr(args, "scene_dir", None):
+            self.scenes = [str(p.resolve()) for p in sorted(Path(args.scene_dir).glob("*.pt"))]
+            if not self.scenes:
+                raise ValueError(f"No demo scenes in {args.scene_dir}; run scripts/download_model.py first")
+        elif args.data == "sw8a":  # 8-action key-switch forks on the held-out maps (shownow/eval/sw8a_split.py)
             from shownow.eval.sw8a_split import split
             from shownow.tree.cond_v3 import split_name
             self.scenes = split()["test_e3" if split_name() == "test" else "scenes"] \
@@ -492,7 +496,8 @@ def make_handler(ctl: Controls, pipe: FramePipe, engine_ref):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--student", default=str(REPO / "checkpoints/shownow_8a_stage2_step001000.pt"))
+    ap.add_argument("--student", default=str(REPO / "checkpoints/ShowNow-5B-8F/shownow_8f.safetensors"))
+    ap.add_argument("--scene-dir", help="Portable initialization scenes; paired camera files live in ../cam")
     ap.add_argument("--denoising-steps", default="1000,667,333", help="SGF schedule (the 8-action student: 3 steps)")
     ap.add_argument("--history", type=int, default=15)
     ap.add_argument("--cam-scale", type=float, default=0.5)

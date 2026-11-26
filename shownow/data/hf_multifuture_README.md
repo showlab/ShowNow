@@ -20,6 +20,8 @@ size_categories:
 Matched multi-future video data for action-conditioned, interactive world models, released with
 **ShowNow: Fine-Grained Speculative Streaming for Responsive World Models**.
 
+[Paper](https://arxiv.org/abs/2611.34693) · [Code](https://github.com/showlab/ShowNow) · [Eight-future inference model](https://huggingface.co/songyiren/ShowNow-5B-8F)
+
 Each sample is a **fork**: a short first-person history followed by **eight futures**. All eight futures start from the
 *same* restored game state and differ only in the action taken. The futures are matched counterfactuals: any difference
 between them is caused by the action, not by a different starting point.
@@ -53,14 +55,16 @@ FOV 130 degrees. The paper trains at 16 fps and 864x480 (temporal and spatial re
 
 `manifest.json` lists the forks and the SHA-256 of every shard. `eval_split.json` gives the evaluation splits:
 `e2_val` (48 forks), `test_e2` (96), and one-minute rollout scenes `scenes` (10) / `test_e3` (20).
+Split entries are portable `.pt` filenames for the pre-encoded samples. After encoding, copy this file to
+`data/cf_vizdoom_sw8i_lat/split.json` in the code repository. The 24 shards total approximately 304 GB;
+subsets can be downloaded independently.
 
 ## How the data were generated
 
-An exploring agent plays Freedoom2 maps MAP01-MAP28 in ViZDoom with god mode. At each sampled fork point the game state
+An exploring agent plays Freedoom2 maps in ViZDoom with god mode. At each sampled fork point the game state
 is saved. Each of the eight action branches is then rendered from the restored state. Restoration is verified: each
 branch must reproduce the saved snapshot; forks that fail are discarded. Forks with damage in the history are excluded,
-and so are forks facing a wall or with a too-dark history (thresholds are in `meta.json` under `checks`). The `held` and
-`switch` subsets were used, mixed, for all training stages in the paper. `eval` uses training maps with a different
+and so are forks facing a wall or with a too-dark history (thresholds are in `meta.json` under `checks`). Training starts with the `held` subset and subsequently incorporates the `switch` subset. `eval` uses training maps with a different
 generator seed and was used only for evaluation.
 
 ## Loading
@@ -83,6 +87,8 @@ this dataset is released under BSD-3-Clause.
 @article{shownow2026,
   title   = {ShowNow: Fine-Grained Speculative Streaming for Responsive World Models},
   author  = {Song, Yiren and Fang, Guian and Shou, Mike Zheng},
-  year    = {2026}
+  journal = {arXiv preprint arXiv:2611.34693},
+  year    = {2026},
+  url     = {https://arxiv.org/abs/2611.34693}
 }
 ```

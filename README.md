@@ -1,4 +1,6 @@
-# ShowNow: speculative real-time world model (8 actions)
+# ShowNow: Fine-Grained Speculative Streaming for Responsive World Models
+
+**Yiren Song · Guian Fang · Mike Zheng Shou** · Show Lab, National University of Singapore
 
 ShowNow is an action-conditioned, autoregressive video world model that responds to key presses in real time on a
 single H100. At every step (one Wan2.2 latent = 4 frames = 0.25 s at 16 fps) it generates the next latent for **every
@@ -9,9 +11,10 @@ student is distilled to **3 SGF denoising steps** (timesteps 1000, 667, 333).
 This repository contains the training, inference and evaluation code of the **8-action** model on ViZDoom
 (Freedoom 2): W, A, S, D, TURN_L, TURN_R, ATTACK, JUMP (action ids 1-8, 0 = no key).
 
-- Paper: arXiv link coming soon
+- Paper: [arXiv:2611.34693](https://arxiv.org/abs/2611.34693)
+- Model: [ShowNow-5B-8F](https://huggingface.co/songyiren/ShowNow-5B-8F) — eight-future BF16 inference weights, approximately 10 GB
 - Dataset: [ShowNow Multi-Future Dataset](https://huggingface.co/datasets/songyiren/ShowNow-MultiFuture) (Hugging Face;
-  3 s of real history + 8 counterfactual futures per fork, hold-key and key-switch)
+  21,964 forks, each with eight futures; held-action, switching-action, and evaluation subsets)
 - License: [Apache 2.0](LICENSE)
 
 ## Layout
@@ -34,38 +37,82 @@ scripts/gen_data_8a.sh            parallel data generation
 
 ## Installation
 
-Python 3.10, CUDA 12.x, H100 recommended (80 GB; training uses FSDP over 8 GPUs per node).
+Python 3.10 and an H100 80 GB GPU are recommended. The release smoke test used PyTorch 2.14.1+cu130 and
+FlashAttention 3; training used the separate PyTorch 2.5.1 / CUDA 12.4 environment. Use a driver compatible with the
+PyTorch CUDA build. Training uses FSDP over 8 GPUs per node.
 
 ```bash
 git clone https://github.com/showlab/ShowNow && cd ShowNow
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt            # training + reference inference
-# optional, optimised real-time path (FlashAttention 3, newer torch) in a second environment:
-#   pip install -r requirements-fast.txt
+pip install -r requirements-fast.txt       # optimized H100 inference
+# For training / reference inference, use a separate environment:
+#   pip install -r requirements.txt
 # optional, data generation (CPU):
 #   pip install -r requirements-sim.txt
 
 # external code, placed at the paths the scripts expect (relative to the repo root)
-git clone https://github.com/Junchao-cs/SolarWM SolarWM            # backbone, runtime, configs; install its requirements
-git clone https://github.com/madebyollin/taehv third_party/taehv    # streaming decoder; put taew2_2.pth in third_party/taehv/
+git clone https://github.com/Junchao-cs/SolarWM SolarWM
+git -C SolarWM checkout ce1da4e7705391eda8eeda6016c0fd3f614b975e
+git clone https://github.com/madebyollin/taehv third_party/taehv
+git -C third_party/taehv checkout 9055eee0391548d1787938d040a161cbe396bf98
+# taew2_2.pth is included in the upstream TAEHV repository.
 ```
 
-Weights (not included), relative to the repo root:
+## Download and run
 
-| path | what |
+```bash
+python scripts/download_model.py
+export SHOWNOW_N_ACTIONS=9 PYTHONPATH=$PWD
+python -m shownow.demo.generate --out runs/demo
+```
+
+This downloads the eight-future EMA student, inference configuration, nominal camera curves and three portable
+initialization clips. It verifies the asset checksums and installs the small architecture/camera files at the paths
+expected by the runtime. The optimized single-GPU demo prepares all eight candidates at every step, selects actions
+W/A/S/D/turn/fire/jump, and writes `runs/demo/rollout.mp4` plus a smoke-test report. The default rollout is 8 seconds
+at **864 × 480, 16 fps**, using three denoising steps. The first run compiles kernels and captures CUDA graphs.
+`--scene 0`, `1`, or `2` selects a different initialization; `--steps` sets the number of generated four-frame blocks.
+
+The quick start uses precomputed prompt embeddings and the TAEHV decoder. It needs no teacher checkpoint, full
+training dataset, text-encoder weights, or full Wan VAE. The released `.safetensors` contains only the inference EMA;
+the original training `.pt` format remains supported by the loader.
+
+| Asset | Location |
 |---|---|
-| `models/SolarWM-5B-base/` | SolarWM-5B base release (Wan2.2-TI2V-5B transformer, VAE `vae/Wan2.2_VAE.pth`, text encoder, `conditioning/wan_negemb_cn.pth`) |
-| `third_party/taehv/taew2_2.pth` | TAEHV decoder for Wan2.2 latents |
-| 4-action tree teacher | initialization of the 8-action teacher (the action table is extended 5 -> 9 entries on load) |
-| ShowNow checkpoints | `checkpoints/shownow_8a_stage2_step001000.pt` etc. (release TBD) |
+| Eight-future student and demo inputs | [songyiren/ShowNow-5B-8F](https://huggingface.co/songyiren/ShowNow-5B-8F) |
+| Eight-future videos, metadata and fixed evaluation split | [songyiren/ShowNow-MultiFuture](https://huggingface.co/datasets/songyiren/ShowNow-MultiFuture) |
+| Streaming decoder | `third_party/taehv/taew2_2.pth` from the pinned TAEHV repository |
+| Additional assets for data encoding / training | SolarWM-5B-base, following the [SolarWM instructions](https://github.com/Junchao-cs/SolarWM); place under `models/SolarWM-5B-base/` |
 
-All scripts are run from the repo root with `PYTHONPATH=$PWD` and `SHOWNOW_N_ACTIONS=9` (action table size = 8 actions + "none").
+All eight-action commands use `SHOWNOW_N_ACTIONS=9`: eight actions plus the no-action embedding. Interactive idle
+pauses the stream. Simultaneous keys use the most recently pressed action.
 
 ## Data
 
 The generated forks used in the paper are released as the
 [ShowNow Multi-Future Dataset](https://huggingface.co/datasets/songyiren/ShowNow-MultiFuture) (mp4 + per-fork metadata;
-`shownow/data/hf_release_multifuture.py` builds the shards). To regenerate them, or to make more:
+`shownow/data/hf_release_multifuture.py` builds the shards).
+
+| Subset | Forks | Contents |
+|---|---:|---|
+| `held` | 10,241 | One held action per branch |
+| `switch` | 11,471 | Action changes within each branch |
+| `eval` | 252 | Separate-seed evaluation forks and fixed split |
+
+The full release is approximately 304 GB across 24 tar shards. Each fork has `history.mp4`, eight
+`future_<ACTION>.mp4` files, and `meta.json`. Raw videos are 1280 × 720 at 32 fps; encoding crops the history and
+resamples to the model's 864 × 480, 16 fps input. Download only the required subset with the Hugging Face CLI:
+
+```bash
+hf download songyiren/ShowNow-MultiFuture --repo-type dataset --include "eval/*" "manifest.json" "eval_split.json" --local-dir data/multifuture
+mkdir -p data/cf_vizdoom_sw8i_32fps
+tar -xf data/multifuture/eval/eval-00000.tar -C data/cf_vizdoom_sw8i_32fps
+```
+
+`manifest.json` records sample IDs, sizes and SHA256 for every shard. `eval_split.json` gives portable `.pt`
+filenames; after encoding the evaluation videos, copy it to `data/cf_vizdoom_sw8i_lat/split.json`.
+The existing inference demos use the small model-package examples and do not require downloading these shards.
+To regenerate the dataset, or to make more:
 
 1. **Generate forks** (CPU). A fork = 3 s of real history + 8 counterfactual 3 s futures from the same engine state, one
    per branch. Hold-key forks hold the branch key for 3 s; key-switch forks start with the branch key and switch to a
@@ -76,10 +123,10 @@ The generated forks used in the paper are released as the
    scripts/gen_data_8a.sh data/cf_vizdoom_8a_32fps 0 32 400 --prefix c8_ --no-damage-flash
    # key-switch training forks, training maps, seed 0
    scripts/gen_data_8a.sh data/cf_vizdoom_sw8t_32fps 0 32 400 --prefix t8_ --mode switch --no-damage-flash \
-       --maps MAP01,MAP02,...,MAP28
+       --maps "$(printf 'MAP%02d,' {1..28} | sed 's/,$//')"
    # key-switch evaluation forks, training maps, a different seed
    scripts/gen_data_8a.sh data/cf_vizdoom_sw8i_32fps 0 32 50 --prefix e8_ --mode switch --no-damage-flash --seed 1 \
-       --maps MAP01,MAP02,...,MAP28
+       --maps "$(printf 'MAP%02d,' {1..28} | sed 's/,$//')"
    ```
 
 2. **Pre-encode** to 16 fps Wan2.2 latents (21 per branch: 9 history + 12 future, 864x480) and camera poses
@@ -99,6 +146,10 @@ The generated forks used in the paper are released as the
    a latent directory restricts the training split to those forks.
 
 ## Training (recipe of the paper's 8-action model)
+
+Training code covers teacher fine-tuning, AnyFlow distillation and Self-Forcing refinement. This release distributes
+the final inference student. The recipe below records the intermediate teacher/student initializations used by the
+paper; those checkpoints are not part of the inference package.
 
 Environment for every stage:
 
@@ -126,12 +177,13 @@ critic weights and the step counters are restored; optimizer moments restart). T
 
 ## Inference
 
-**Browser demo** (FastTree engine; with 8 candidates one step takes about 270 ms on an H100, slightly above the 250 ms
-budget of 16 fps, so the demo stutters; the optimised path below is real time):
+**Browser demo** (reference FastTree engine, approximately 270 ms per eight-candidate step on an H100).
+The optimized video-generation quick start above uses the faster `RTStepper` engine.
 
 ```bash
 SHOWNOW_N_ACTIONS=9 SOLARWM_COMPILE_FLEX=1 PYTHONPATH=$PWD python -m shownow.demo.play_server \
-    --student checkpoints/shownow_8a_stage2_step001000.pt --denoising-steps 1000,667,333 --port 8765
+    --student checkpoints/ShowNow-5B-8F/shownow_8f.safetensors \
+    --scene-dir checkpoints/ShowNow-5B-8F/examples/lat --denoising-steps 1000,667,333 --port 8765
 # open http://127.0.0.1:8765 : W/A/S/D move, Q/E turn, F fire, Space jump, R restart, N next scene
 ```
 
@@ -213,14 +265,21 @@ duplicated history cache), `shownow/eval/unfused_budget_bench.py` (per-step cost
 `shownow/eval/hy_nomas_latency.py` measure other interactive world models under the same key-press protocol; each runs
 in that model's own environment with its code and weights installed separately.
 
+## Release scope
+
+This repository releases the eight-action ViZDoom training and inference code, the final eight-future student,
+and the matched multi-future dataset. Long rollouts and revisits can lose visual consistency; combinations of
+simultaneous actions and the separate 33B model are outside this checkpoint's action interface.
+
 ## Citation
 
 ```bibtex
 @article{shownow2026,
-  title   = {ShowNow},
-  author  = {TBD},
-  journal = {arXiv preprint},
-  year    = {2026}
+  title   = {ShowNow: Fine-Grained Speculative Streaming for Responsive World Models},
+  author  = {Song, Yiren and Fang, Guian and Shou, Mike Zheng},
+  journal = {arXiv preprint arXiv:2611.34693},
+  year    = {2026},
+  url     = {https://arxiv.org/abs/2611.34693}
 }
 ```
 

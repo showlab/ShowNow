@@ -47,8 +47,12 @@ def build_stage2_student(path: str, field: str = "generator_ema", block: int = 3
                         local_attn_size=history + block)
     diffusion = build_diffusion_architecture(cfg)
     add_action_conditioning(diffusion.module)
-    payload = torch.load(path, map_location="cpu", weights_only=True, mmap=True)
-    sd = payload[field] if field in payload else payload["generator"]
+    if Path(path).suffix == ".safetensors":
+        from safetensors.torch import load_file
+        sd = load_file(str(path), device="cpu")
+    else:
+        payload = torch.load(path, map_location="cpu", weights_only=True, mmap=True)
+        sd = payload[field] if field in payload else payload["generator"]
     dropped = [k for k in sd if k.startswith("delta_embedding.")]
     sd = {k: v for k, v in sd.items() if not k.startswith("delta_embedding.") and not k.startswith("_shownow_inner.")}
     res = diffusion.module.load_state_dict(sd, strict=False)

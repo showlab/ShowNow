@@ -59,7 +59,11 @@ def early_blocked(actions: torch.Tensor, cam_true: torch.Tensor) -> float:
 def split(create: bool = False) -> dict:
     path = LAT / "split.json"
     if path.exists():
-        return json.loads(path.read_text())
+        result = json.loads(path.read_text())
+        # Public splits use sample filenames; older local splits contain absolute paths.
+        for name, _ in SIZES:
+            result[name] = [str(LAT / Path(f).name) for f in result[name]]
+        return result
     assert create, f"{path} missing: create it once after encoding (python -m shownow.eval.sw8a_split)"
     files = sorted(f for f in LAT.glob("*.pt") if f.name != "split.json")
     ok, stats = [], []
